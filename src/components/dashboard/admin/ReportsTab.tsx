@@ -189,6 +189,90 @@ const ReportsTab = () => {
     }
   };
 
+  const exportAll = async () => {
+    setLoading('all');
+    try {
+      const [coursesSnapshot, disciplinesSnapshot] = await Promise.all([
+        getDocs(collection(db, 'curso')),
+        getDocs(collection(db, 'disc-pos-mensal'))
+      ]);
+
+      // Sheet 1: Cursos
+      const coursesData = coursesSnapshot.docs.map(doc => ({
+        'Nome do Curso': doc.data().name || '',
+        'Nome do Coordenador': doc.data().coordinatorName || '',
+        'Login do Coordenador': doc.data().coordinatorLogin || '',
+        'Nome do Tutor': doc.data().tutorName || '',
+        'Login do Tutor': doc.data().tutorLogin || '',
+        'Data de Criação': doc.data().createdAt?.toDate?.()?.toLocaleDateString('pt-BR') || ''
+      }));
+
+      // Sheet 2: Disciplinas completas
+      const disciplinesData = disciplinesSnapshot.docs.map(doc => ({
+        'Nome da Disciplina': doc.data().name || '',
+        'Curso': doc.data().courseName || '',
+        'Nome do Coordenador': doc.data().coordinatorName || '',
+        'Login do Coordenador': doc.data().coordinatorLogin || '',
+        'Nome do Professor': doc.data().professorName || '',
+        'Login do Professor': doc.data().professorLogin || '',
+        'Nome do Tutor': doc.data().tutorName || '',
+        'Login do Tutor': doc.data().tutorLogin || '',
+        'Status': doc.data().status || '',
+        'Mês': doc.data().month || '',
+        'Data': doc.data().date || ''
+      }));
+
+      // Sheet 3: Resumo por período (agrupa disciplinas por mês)
+      const periodSummary: Record<string, { count: number; disciplines: string[] }> = {};
+      disciplinesSnapshot.docs.forEach(doc => {
+        const month = doc.data().month || 'Sem período';
+        if (!periodSummary[month]) {
+          periodSummary[month] = { count: 0, disciplines: [] };
+        }
+        periodSummary[month].count++;
+        periodSummary[month].disciplines.push(doc.data().name || 'Sem nome');
+      });
+
+      const periodData = Object.entries(periodSummary).map(([month, data]) => ({
+        'Período/Mês': month,
+        'Quantidade de Disciplinas': data.count,
+        'Disciplinas': data.disciplines.join(', ')
+      }));
+
+      if (coursesData.length === 0 && disciplinesData.length === 0) {
+        toast.error('Nenhum dado encontrado para exportar');
+        return;
+      }
+
+      // Create workbook with multiple sheets
+      const workbook = XLSX.utils.book_new();
+      
+      if (coursesData.length > 0) {
+        const coursesSheet = XLSX.utils.json_to_sheet(coursesData);
+        XLSX.utils.book_append_sheet(workbook, coursesSheet, 'Cursos');
+      }
+      
+      if (disciplinesData.length > 0) {
+        const disciplinesSheet = XLSX.utils.json_to_sheet(disciplinesData);
+        XLSX.utils.book_append_sheet(workbook, disciplinesSheet, 'Disciplinas');
+      }
+      
+      if (periodData.length > 0) {
+        const periodSheet = XLSX.utils.json_to_sheet(periodData);
+        XLSX.utils.book_append_sheet(workbook, periodSheet, 'Por Período');
+      }
+
+      const today = format(new Date(), 'dd-MM-yyyy');
+      XLSX.writeFile(workbook, `relatorio-completo-${today}.xlsx`);
+      toast.success(`Relatório completo exportado: ${coursesData.length} cursos, ${disciplinesData.length} disciplinas`);
+    } catch (error) {
+      console.error('Erro ao exportar relatório completo:', error);
+      toast.error('Erro ao exportar relatório completo');
+    } finally {
+      setLoading(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 md:grid-cols-2">
@@ -280,6 +364,28 @@ const ReportsTab = () => {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border-primary/50 bg-primary/5">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-primary" />
+            Exportar Tudo
+          </CardTitle>
+          <CardDescription>
+            Relatório completo com cursos, disciplinas, coordenadores, professores e períodos em múltiplas abas
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button onClick={exportAll} disabled={loading === 'all'} className="w-full">
+            {loading === 'all' ? (
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            ) : (
+              <Download className="h-4 w-4 mr-2" />
+            )}
+            Exportar Relatório Completo (XLSX)
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
