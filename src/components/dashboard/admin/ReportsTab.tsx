@@ -1,21 +1,33 @@
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
-import { CalendarIcon, Download, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { Download, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
+const MONTHS = [
+  { value: '1', label: 'Janeiro (1)' },
+  { value: '2', label: 'Fevereiro (2)' },
+  { value: '3', label: 'Março (3)' },
+  { value: '4', label: 'Abril (4)' },
+  { value: '5', label: 'Maio (5)' },
+  { value: '6', label: 'Junho (6)' },
+  { value: '7', label: 'Julho (7)' },
+  { value: '8', label: 'Agosto (8)' },
+  { value: '9', label: 'Setembro (9)' },
+  { value: '10', label: 'Outubro (10)' },
+  { value: '11', label: 'Novembro (11)' },
+  { value: '12', label: 'Dezembro (12)' },
+];
+
 const ReportsTab = () => {
   const [loading, setLoading] = useState<string | null>(null);
-  const [startDate, setStartDate] = useState<Date>();
-  const [endDate, setEndDate] = useState<Date>();
+  const [startMonth, setStartMonth] = useState<string>('');
+  const [endMonth, setEndMonth] = useState<string>('');
 
   const exportToExcel = (data: any[], fileName: string, sheetName: string) => {
     const worksheet = XLSX.utils.json_to_sheet(data);
@@ -145,8 +157,16 @@ const ReportsTab = () => {
   };
 
   const exportDisciplinesByPeriod = async () => {
-    if (!startDate || !endDate) {
-      toast.error('Selecione o período inicial e final');
+    if (!startMonth || !endMonth) {
+      toast.error('Selecione o mês inicial e final');
+      return;
+    }
+    
+    const start = parseInt(startMonth);
+    const end = parseInt(endMonth);
+    
+    if (start > end) {
+      toast.error('O mês inicial deve ser menor ou igual ao mês final');
       return;
     }
     
@@ -156,12 +176,9 @@ const ReportsTab = () => {
       
       const disciplines = snapshot.docs
         .filter(doc => {
-          const dateStr = doc.data().date;
-          if (!dateStr) return false;
-          
-          // Parse date string (assuming format YYYY-MM-DD or similar)
-          const docDate = new Date(dateStr);
-          return docDate >= startDate && docDate <= endDate;
+          const month = parseInt(doc.data().month);
+          if (isNaN(month)) return false;
+          return month >= start && month <= end;
         })
         .map(doc => ({
           Nome: doc.data().name || '',
@@ -169,7 +186,6 @@ const ReportsTab = () => {
           Professor: doc.data().professorLogin || '',
           Coordenador: doc.data().coordinatorLogin || '',
           Status: doc.data().status || '',
-          Data: doc.data().date || '',
           Mês: doc.data().month || ''
         }));
       
@@ -178,8 +194,7 @@ const ReportsTab = () => {
         return;
       }
       
-      const periodStr = `${format(startDate, 'dd-MM-yyyy')}_a_${format(endDate, 'dd-MM-yyyy')}`;
-      exportToExcel(disciplines, `disciplinas-${periodStr}`, 'Disciplinas');
+      exportToExcel(disciplines, `disciplinas-mes-${startMonth}-a-${endMonth}`, 'Disciplinas');
       toast.success(`${disciplines.length} disciplinas exportadas`);
     } catch (error) {
       console.error('Erro ao exportar disciplinas por período:', error);
@@ -391,72 +406,50 @@ const ReportsTab = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <FileSpreadsheet className="h-5 w-5" />
-            Disciplinas por Período
+            Disciplinas por Período (Mês)
           </CardTitle>
           <CardDescription>
-            Exportar disciplinas que ocorreram em um período específico
+            Exportar disciplinas que ocorrem em um intervalo de meses (1-12)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Data Inicial</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-[200px] justify-start text-left font-normal",
-                      !startDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {startDate ? format(startDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={startDate}
-                    onSelect={setStartDate}
-                    locale={ptBR}
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
+              <label className="text-sm font-medium">Mês Inicial</label>
+              <Select value={startMonth} onValueChange={setStartMonth}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Selecionar mês" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTHS.map((month) => (
+                    <SelectItem key={month.value} value={month.value}>
+                      {month.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Data Final</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className={cn(
-                      "w-[200px] justify-start text-left font-normal",
-                      !endDate && "text-muted-foreground"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {endDate ? format(endDate, "dd/MM/yyyy", { locale: ptBR }) : "Selecionar"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={endDate}
-                    onSelect={setEndDate}
-                    locale={ptBR}
-                    className="pointer-events-auto"
-                  />
-                </PopoverContent>
-              </Popover>
+              <label className="text-sm font-medium">Mês Final</label>
+              <Select value={endMonth} onValueChange={setEndMonth}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Selecionar mês" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTHS.map((month) => (
+                    <SelectItem key={month.value} value={month.value}>
+                      {month.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
           <Button 
             onClick={exportDisciplinesByPeriod} 
-            disabled={loading === 'period' || !startDate || !endDate}
+            disabled={loading === 'period' || !startMonth || !endMonth}
             className="w-full md:w-auto"
           >
             {loading === 'period' ? (
