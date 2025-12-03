@@ -116,13 +116,15 @@ const ReportsTab = () => {
       const courseData = coursesSnapshot.docs.map(doc => ({
         Tipo: 'Curso',
         Nome: doc.data().name || '',
-        Coordenador: doc.data().coordinatorName || ''
+        'Nome do Coordenador': doc.data().coordinatorName || '',
+        'Login do Coordenador': doc.data().coordinatorLogin || ''
       }));
       
       const disciplineData = disciplinesSnapshot.docs.map(doc => ({
         Tipo: 'Disciplina',
         Nome: doc.data().name || '',
-        Coordenador: doc.data().coordinatorLogin || ''
+        'Nome do Coordenador': doc.data().coordinatorName || '',
+        'Login do Coordenador': doc.data().coordinatorLogin || ''
       }));
       
       const allData = [...courseData, ...disciplineData];
