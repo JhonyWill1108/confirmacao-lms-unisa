@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import Header from './Header';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, LayoutDashboard, BookOpen, Users, GraduationCap } from 'lucide-react';
+import { Upload, LayoutDashboard, BookOpen, Users, GraduationCap, FileBarChart } from 'lucide-react';
 import UploadTab from './admin/UploadTab';
 import OverviewTab from './admin/OverviewTab';
 import DisciplinesTab from './admin/DisciplinesTab';
 import CoursesTab from './admin/CoursesTab';
 import PeopleTab from './admin/PeopleTab';
+import ReportsTab from './admin/ReportsTab';
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview');
@@ -29,7 +30,7 @@ const AdminDashboard = () => {
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto">
             <TabsTrigger value="overview" className="gap-2">
               <LayoutDashboard className="h-4 w-4" />
               <span className="hidden sm:inline">Visão Geral</span>
@@ -49,6 +50,10 @@ const AdminDashboard = () => {
             <TabsTrigger value="people" className="gap-2">
               <Users className="h-4 w-4" />
               <span className="hidden sm:inline">Usuários</span>
+            </TabsTrigger>
+            <TabsTrigger value="reports" className="gap-2">
+              <FileBarChart className="h-4 w-4" />
+              <span className="hidden sm:inline">Relatórios</span>
             </TabsTrigger>
           </TabsList>
 
@@ -70,6 +75,10 @@ const AdminDashboard = () => {
 
           <TabsContent value="people">
             <PeopleTab key={`people-${refreshTrigger}`} onDataChange={handleDataChange} />
+          </TabsContent>
+
+          <TabsContent value="reports">
+            <ReportsTab />
           </TabsContent>
         </Tabs>
       </main>
