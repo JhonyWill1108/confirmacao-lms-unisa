@@ -996,14 +996,14 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
                       <div className="space-y-2">
                         <Label>Mês 1</Label>
                         <Select
-                          value={formData['mes-1']}
-                          onValueChange={(value) => setFormData({ ...formData, 'mes-1': value })}
+                          value={formData['mes-1'] || 'none'}
+                          onValueChange={(value) => setFormData({ ...formData, 'mes-1': value === 'none' ? '' : value })}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Selecione o mês" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="none">Nenhum</SelectItem>
                             {MONTHS.map((month) => (
                               <SelectItem key={month.value} value={month.value}>
                                 {month.value} - {month.label}
@@ -1015,14 +1015,14 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
                       <div className="space-y-2">
                         <Label>Mês 2</Label>
                         <Select
-                          value={formData['mes-2']}
-                          onValueChange={(value) => setFormData({ ...formData, 'mes-2': value })}
+                          value={formData['mes-2'] || 'none'}
+                          onValueChange={(value) => setFormData({ ...formData, 'mes-2': value === 'none' ? '' : value })}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Selecione o mês" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Nenhum</SelectItem>
+                            <SelectItem value="none">Nenhum</SelectItem>
                             {MONTHS.map((month) => (
                               <SelectItem key={month.value} value={month.value}>
                                 {month.value} - {month.label}
