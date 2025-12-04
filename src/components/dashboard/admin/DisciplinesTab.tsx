@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Course, Discipline, Person } from '@/types';
-import { Plus, Loader2, Edit, Trash2, ChevronsUpDown, Check } from 'lucide-react';
+import { Plus, Loader2, Edit, Trash2, ChevronsUpDown, Check, Download, Upload } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -35,10 +35,35 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAuditLog } from '@/hooks/useAuditLog';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { AlertCircle } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface DisciplinesTabProps {
   onDataChange?: () => void;
 }
+
+const MONTHS = [
+  { value: '1', label: 'Janeiro' },
+  { value: '2', label: 'Fevereiro' },
+  { value: '3', label: 'Março' },
+  { value: '4', label: 'Abril' },
+  { value: '5', label: 'Maio' },
+  { value: '6', label: 'Junho' },
+  { value: '7', label: 'Julho' },
+  { value: '8', label: 'Agosto' },
+  { value: '9', label: 'Setembro' },
+  { value: '10', label: 'Outubro' },
+  { value: '11', label: 'Novembro' },
+  { value: '12', label: 'Dezembro' },
+];
 
 const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
   const { userData } = useAuth();
@@ -47,6 +72,8 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
   const [filteredDisciplines, setFilteredDisciplines] = useState<Discipline[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [professors, setProfessors] = useState<Person[]>([]);
+  const [coordinators, setCoordinators] = useState<Person[]>([]);
+  const [tutors, setTutors] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -65,11 +92,27 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
   const [saving, setSaving] = useState(false);
   const [sortOrder, setSortOrder] = useState<'alphabetical' | 'month'>('month');
   const [professorPopoverOpen, setProfessorPopoverOpen] = useState(false);
+  const [coordinatorPopoverOpen, setCoordinatorPopoverOpen] = useState(false);
+  const [tutorPopoverOpen, setTutorPopoverOpen] = useState(false);
+  
+  // Batch upload states
+  const [uploading, setUploading] = useState(false);
+  const [uploadResultOpen, setUploadResultOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewData, setPreviewData] = useState<any[]>([]);
+  const [uploadResult, setUploadResult] = useState<{
+    created: string[];
+    ignored: string[];
+    errors: string[];
+  }>({ created: [], ignored: [], errors: [] });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadDisciplines();
     loadCourses();
     loadProfessors();
+    loadCoordinators();
+    loadTutors();
   }, []);
 
   useEffect(() => {
@@ -83,6 +126,7 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
         id: doc.id,
         ...doc.data(),
       })) as Course[];
+      data.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       setCourses(data);
     } catch (error) {
       console.error('Error loading courses:', error);
@@ -117,7 +161,6 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
           createdAt: docData.createdAt?.toDate() || new Date(),
         } as Person;
       });
-      // Ordenar alfabeticamente
       data.sort((a, b) => {
         const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
         const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
@@ -126,6 +169,84 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
       setProfessors(data);
     } catch (error) {
       console.error('Error loading professors:', error);
+    }
+  };
+
+  const loadCoordinators = async () => {
+    try {
+      const q = query(collection(db, 'user-pos'), where('tipo', '==', 'Coordenador'));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map((doc) => {
+        const docData = doc.data();
+        let firstName = docData.firstName || '';
+        let lastName = docData.lastName || '';
+        
+        if (docData.nome && (!firstName || !lastName)) {
+          const nameParts = docData.nome.trim().split(' ');
+          firstName = nameParts[0] || '';
+          lastName = nameParts.slice(1).join(' ') || '';
+        }
+        
+        return {
+          id: doc.id,
+          tipo: docData.tipo,
+          firstName,
+          lastName,
+          login: docData.login,
+          email: docData.email,
+          senha: docData.senha,
+          courseId: docData.courseId,
+          courseName: docData.courseName,
+          createdAt: docData.createdAt?.toDate() || new Date(),
+        } as Person;
+      });
+      data.sort((a, b) => {
+        const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
+        const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+        return nameA.localeCompare(nameB, 'pt-BR');
+      });
+      setCoordinators(data);
+    } catch (error) {
+      console.error('Error loading coordinators:', error);
+    }
+  };
+
+  const loadTutors = async () => {
+    try {
+      const q = query(collection(db, 'user-pos'), where('tipo', '==', 'Tutor'));
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map((doc) => {
+        const docData = doc.data();
+        let firstName = docData.firstName || '';
+        let lastName = docData.lastName || '';
+        
+        if (docData.nome && (!firstName || !lastName)) {
+          const nameParts = docData.nome.trim().split(' ');
+          firstName = nameParts[0] || '';
+          lastName = nameParts.slice(1).join(' ') || '';
+        }
+        
+        return {
+          id: doc.id,
+          tipo: docData.tipo,
+          firstName,
+          lastName,
+          login: docData.login,
+          email: docData.email,
+          senha: docData.senha,
+          courseId: docData.courseId,
+          courseName: docData.courseName,
+          createdAt: docData.createdAt?.toDate() || new Date(),
+        } as Person;
+      });
+      data.sort((a, b) => {
+        const nameA = `${a.firstName} ${a.lastName}`.toLowerCase();
+        const nameB = `${b.firstName} ${b.lastName}`.toLowerCase();
+        return nameA.localeCompare(nameB, 'pt-BR');
+      });
+      setTutors(data);
+    } catch (error) {
+      console.error('Error loading tutors:', error);
     }
   };
 
@@ -177,9 +298,9 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
       filtered.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
     } else {
       filtered.sort((a, b) => {
-        const monthA = a['mes-1'] || '9999-99';
-        const monthB = b['mes-1'] || '9999-99';
-        return monthA.localeCompare(monthB);
+        const monthA = parseInt(a['mes-1'] || '99');
+        const monthB = parseInt(b['mes-1'] || '99');
+        return monthA - monthB;
       });
     }
     
@@ -226,7 +347,6 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
       if (editingDiscipline) {
         await updateDoc(doc(db, 'disc-pos-mensal', editingDiscipline.id), disciplineData);
         
-        // Log audit
         if (userData) {
           await logAction(
             userData.id,
@@ -249,7 +369,6 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
           createdAt: Timestamp.now(),
         });
         
-        // Log audit
         if (userData) {
           await logAction(
             userData.id,
@@ -313,7 +432,6 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
     try {
       await deleteDoc(doc(db, 'disc-pos-mensal', disciplineToDelete.id));
       
-      // Log audit
       if (userData) {
         await logAction(
           userData.id,
@@ -353,6 +471,236 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
     });
   };
 
+  const getMonthLabel = (value: string) => {
+    const month = MONTHS.find(m => m.value === value);
+    return month ? month.label : value;
+  };
+
+  // Batch upload functions
+  const handleDownloadTemplate = () => {
+    const templateData = [
+      { 
+        'Nome da Disciplina': 'Inteligência Artificial', 
+        'Nome do Curso': 'Mestrado em Ciência da Computação',
+        'Login do Coordenador': 'joao.silva',
+        'Login do Professor': 'maria.santos',
+        'Login do Tutor': 'carlos.oliveira',
+        'Mês 1': '3',
+        'Mês 2': '9'
+      },
+      { 
+        'Nome da Disciplina': 'Marketing Digital', 
+        'Nome do Curso': 'MBA em Marketing',
+        'Login do Coordenador': 'ana.costa',
+        'Login do Professor': 'pedro.lima',
+        'Login do Tutor': '',
+        'Mês 1': '5',
+        'Mês 2': ''
+      },
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    ws['!cols'] = [{ wch: 30 }, { wch: 40 }, { wch: 20 }, { wch: 20 }, { wch: 20 }, { wch: 10 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Disciplinas');
+    XLSX.writeFile(wb, 'template_disciplinas.xlsx');
+    toast({ title: 'Template baixado com sucesso!' });
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      if (jsonData.length === 0) {
+        toast({ title: 'Planilha vazia', variant: 'destructive' });
+        return;
+      }
+
+      // Buscar todos os usuários e cursos para validar
+      const peopleSnapshot = await getDocs(collection(db, 'user-pos'));
+      const existingPeopleByLogin = new Map<string, any>(
+        peopleSnapshot.docs.map(doc => [doc.data().login?.toLowerCase(), { id: doc.id, ...doc.data() }])
+      );
+
+      const coursesSnapshot = await getDocs(collection(db, 'curs-pos-mensal'));
+      const existingCoursesByName = new Map<string, any>(
+        coursesSnapshot.docs.map(doc => [doc.data().name?.toLowerCase(), { id: doc.id, ...doc.data() }])
+      );
+
+      // Enriquecer os dados com validações
+      const enrichedData = jsonData.map((row) => {
+        const courseName = row['Nome do Curso']?.trim();
+        const coordinatorLogin = row['Login do Coordenador']?.trim();
+        const professorLogin = row['Login do Professor']?.trim();
+        const tutorLogin = row['Login do Tutor']?.trim();
+
+        const course = courseName ? existingCoursesByName.get(courseName.toLowerCase()) : null;
+        const coordinator = coordinatorLogin ? existingPeopleByLogin.get(coordinatorLogin.toLowerCase()) : null;
+        const professor = professorLogin ? existingPeopleByLogin.get(professorLogin.toLowerCase()) : null;
+        const tutor = tutorLogin ? existingPeopleByLogin.get(tutorLogin.toLowerCase()) : null;
+
+        return {
+          ...row,
+          courseFound: !!course,
+          courseId: course?.id,
+          coordinatorFound: coordinatorLogin ? !!coordinator : true,
+          coordinatorFullName: coordinator ? `${coordinator.firstName} ${coordinator.lastName}` : null,
+          professorFound: professorLogin ? !!professor : true,
+          professorFullName: professor ? `${professor.firstName} ${professor.lastName}` : null,
+          tutorFound: tutorLogin ? !!tutor : true,
+          tutorFullName: tutor ? `${tutor.firstName} ${tutor.lastName}` : null,
+        };
+      });
+
+      setPreviewData(enrichedData);
+      setPreviewOpen(true);
+    } catch (error) {
+      console.error('Error reading file:', error);
+      toast({ title: 'Erro ao ler arquivo', variant: 'destructive' });
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const confirmImport = async () => {
+    setUploading(true);
+    setPreviewOpen(false);
+    const result = { created: [] as string[], ignored: [] as string[], errors: [] as string[] };
+    
+    try {
+      const disciplinesSnapshot = await getDocs(collection(db, 'disc-pos-mensal'));
+      const existingDisciplines = new Map(
+        disciplinesSnapshot.docs.map(doc => [doc.data().name?.toLowerCase(), doc.id])
+      );
+
+      const coursesSnapshot = await getDocs(collection(db, 'curs-pos-mensal'));
+      const existingCoursesByName = new Map<string, any>(
+        coursesSnapshot.docs.map(doc => [doc.data().name?.toLowerCase(), { id: doc.id, name: doc.data().name }])
+      );
+
+      const peopleSnapshot = await getDocs(collection(db, 'user-pos'));
+      const existingPeopleByLogin = new Map<string, any>(
+        peopleSnapshot.docs.map(doc => [doc.data().login?.toLowerCase(), { id: doc.id, ...doc.data() }])
+      );
+
+      let rowNum = 1;
+      
+      for (const row of previewData) {
+        rowNum++;
+        try {
+          const disciplineName = row['Nome da Disciplina']?.trim();
+          const courseName = row['Nome do Curso']?.trim();
+          const coordinatorLogin = row['Login do Coordenador']?.trim();
+          const professorLogin = row['Login do Professor']?.trim();
+          const tutorLogin = row['Login do Tutor']?.trim();
+          const mes1 = row['Mês 1']?.toString().trim();
+          const mes2 = row['Mês 2']?.toString().trim();
+          
+          if (!disciplineName) {
+            result.errors.push(`Linha ${rowNum}: Nome da Disciplina é obrigatório`);
+            continue;
+          }
+
+          if (!courseName) {
+            result.errors.push(`Linha ${rowNum}: Nome do Curso é obrigatório`);
+            continue;
+          }
+
+          // Buscar curso
+          const course = existingCoursesByName.get(courseName.toLowerCase());
+          if (!course) {
+            result.errors.push(`Linha ${rowNum}: Curso "${courseName}" não encontrado`);
+            continue;
+          }
+
+          // Validar coordenador se fornecido
+          if (coordinatorLogin && !existingPeopleByLogin.get(coordinatorLogin.toLowerCase())) {
+            result.errors.push(`Linha ${rowNum}: Coordenador com login "${coordinatorLogin}" não encontrado`);
+            continue;
+          }
+
+          // Validar professor se fornecido
+          if (professorLogin && !existingPeopleByLogin.get(professorLogin.toLowerCase())) {
+            result.errors.push(`Linha ${rowNum}: Professor com login "${professorLogin}" não encontrado`);
+            continue;
+          }
+
+          // Validar tutor se fornecido
+          if (tutorLogin && !existingPeopleByLogin.get(tutorLogin.toLowerCase())) {
+            result.errors.push(`Linha ${rowNum}: Tutor com login "${tutorLogin}" não encontrado`);
+            continue;
+          }
+
+          // Verificar se disciplina já existe
+          const existingDisciplineId = existingDisciplines.get(disciplineName.toLowerCase());
+          
+          if (existingDisciplineId) {
+            // Atualizar disciplina existente adicionando o curso
+            const existingDoc = disciplinesSnapshot.docs.find(d => d.id === existingDisciplineId);
+            if (existingDoc) {
+              const existingData = existingDoc.data();
+              const currentCourseIds = existingData.courseIds || [];
+              const currentCourseNames = existingData.courseNames || [];
+
+              if (!currentCourseIds.includes(course.id)) {
+                if (currentCourseIds.length >= 15) {
+                  result.errors.push(`Linha ${rowNum}: Disciplina "${disciplineName}" já tem 15 cursos vinculados`);
+                  continue;
+                }
+
+                await updateDoc(doc(db, 'disc-pos-mensal', existingDisciplineId), {
+                  courseIds: [...currentCourseIds, course.id],
+                  courseNames: [...currentCourseNames, course.name],
+                  updatedAt: Timestamp.now(),
+                });
+                result.created.push(`Linha ${rowNum}: Curso "${courseName}" vinculado à disciplina "${disciplineName}"`);
+              } else {
+                result.ignored.push(`Linha ${rowNum}: Disciplina "${disciplineName}" já vinculada ao curso "${courseName}"`);
+              }
+            }
+          } else {
+            // Criar nova disciplina
+            const disciplineData: any = {
+              name: disciplineName,
+              courseIds: [course.id],
+              courseNames: [course.name],
+              coordinatorLogin: coordinatorLogin || '',
+              professorLogin: professorLogin || '',
+              tutorLogin: tutorLogin || '',
+              'mes-1': mes1 || '',
+              'mes-2': mes2 || '',
+              createdAt: Timestamp.now(),
+              updatedAt: Timestamp.now(),
+            };
+
+            const docRef = await addDoc(collection(db, 'disc-pos-mensal'), disciplineData);
+            existingDisciplines.set(disciplineName.toLowerCase(), docRef.id);
+            result.created.push(`Linha ${rowNum}: Disciplina "${disciplineName}" criada`);
+          }
+        } catch (error) {
+          console.error(`Error processing row ${rowNum}:`, error);
+          result.errors.push(`Linha ${rowNum}: Erro ao processar`);
+        }
+      }
+
+      setUploadResult(result);
+      setUploadResultOpen(true);
+      setPreviewData([]);
+      loadDisciplines();
+      onDataChange?.();
+    } catch (error) {
+      console.error('Error uploading:', error);
+      toast({ title: 'Erro ao importar', variant: 'destructive' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -370,191 +718,345 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
               <CardTitle>Disciplinas</CardTitle>
               <CardDescription>Gerencie as disciplinas</CardDescription>
             </div>
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogTrigger asChild>
-                <Button onClick={() => handleDialogClose()}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Nova Disciplina
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>
-                    {editingDiscipline ? 'Editar Disciplina' : 'Nova Disciplina'}
-                  </DialogTitle>
-                  <DialogDescription>
-                    Preencha os dados da disciplina
-                  </DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nome da Disciplina *</Label>
-                    <Input
-                      id="name"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      placeholder="Ex: Inteligência Artificial"
-                      required
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Cursos * (até 15)</Label>
-                    <ScrollArea className="h-[150px] border rounded-lg p-3">
-                      <div className="space-y-2">
-                        {courses.map((course) => (
-                          <div key={course.id} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={`course-${course.id}`}
-                              checked={formData.courseIds.includes(course.id)}
-                              disabled={
-                                formData.courseIds.length >= 15 &&
-                                !formData.courseIds.includes(course.id)
-                              }
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFormData({
-                                    ...formData,
-                                    courseIds: [...formData.courseIds, course.id],
-                                  });
-                                } else {
-                                  setFormData({
-                                    ...formData,
-                                    courseIds: formData.courseIds.filter(id => id !== course.id),
-                                  });
-                                }
-                              }}
-                            />
-                            <label
-                              htmlFor={`course-${course.id}`}
-                              className="text-sm cursor-pointer"
-                            >
-                              {course.name}
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </ScrollArea>
-                    <p className="text-xs text-muted-foreground">
-                      {formData.courseIds.length}/15 cursos selecionados
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={handleDownloadTemplate}>
+                <Download className="h-4 w-4 mr-2" />
+                Baixar Template
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Importando...</>
+                ) : (
+                  <><Upload className="h-4 w-4 mr-2" />Importar Excel</>
+                )}
+              </Button>
+              <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button onClick={() => handleDialogClose()}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Nova Disciplina
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {editingDiscipline ? 'Editar Disciplina' : 'Nova Disciplina'}
+                    </DialogTitle>
+                    <DialogDescription>
+                      Preencha os dados da disciplina
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                      <Label htmlFor="coordinatorLogin">Login Coordenador</Label>
+                      <Label htmlFor="name">Nome da Disciplina *</Label>
                       <Input
-                        id="coordinatorLogin"
-                        value={formData.coordinatorLogin}
-                        onChange={(e) => setFormData({ ...formData, coordinatorLogin: e.target.value })}
-                        placeholder="Ex: joao.silva"
+                        id="name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="Ex: Inteligência Artificial"
+                        required
                       />
                     </div>
+
                     <div className="space-y-2">
-                      <Label htmlFor="professorLogin">Professor</Label>
-                      <Popover open={professorPopoverOpen} onOpenChange={setProfessorPopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            id="professorLogin"
-                            variant="outline"
-                            role="combobox"
-                            aria-expanded={professorPopoverOpen}
-                            className="w-full justify-between"
-                          >
-                            {formData.professorLogin
-                              ? (() => {
-                                  const prof = professors.find((p) => p.login === formData.professorLogin);
-                                  return prof ? `${prof.firstName} ${prof.lastName} (${prof.login})` : formData.professorLogin;
-                                })()
-                              : "Selecionar professor..."}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[300px] p-0">
-                          <Command>
-                            <CommandInput placeholder="Buscar professor..." />
-                            <CommandList>
-                              <CommandEmpty>Nenhum professor encontrado.</CommandEmpty>
-                              <CommandGroup>
-                                {professors.map((professor) => (
+                      <Label>Cursos * (até 15)</Label>
+                      <ScrollArea className="h-[150px] border rounded-lg p-3">
+                        <div className="space-y-2">
+                          {courses.map((course) => (
+                            <div key={course.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`course-${course.id}`}
+                                checked={formData.courseIds.includes(course.id)}
+                                disabled={
+                                  formData.courseIds.length >= 15 &&
+                                  !formData.courseIds.includes(course.id)
+                                }
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setFormData({
+                                      ...formData,
+                                      courseIds: [...formData.courseIds, course.id],
+                                    });
+                                  } else {
+                                    setFormData({
+                                      ...formData,
+                                      courseIds: formData.courseIds.filter(id => id !== course.id),
+                                    });
+                                  }
+                                }}
+                              />
+                              <label
+                                htmlFor={`course-${course.id}`}
+                                className="text-sm cursor-pointer"
+                              >
+                                {course.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                      <p className="text-xs text-muted-foreground">
+                        {formData.courseIds.length}/15 cursos selecionados
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>Coordenador</Label>
+                        <Popover open={coordinatorPopoverOpen} onOpenChange={setCoordinatorPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={coordinatorPopoverOpen}
+                              className="w-full justify-between"
+                            >
+                              {formData.coordinatorLogin
+                                ? (() => {
+                                    const coord = coordinators.find((c) => c.login === formData.coordinatorLogin);
+                                    return coord ? `${coord.firstName} ${coord.lastName}` : formData.coordinatorLogin;
+                                  })()
+                                : "Selecionar..."}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0 bg-popover">
+                            <Command>
+                              <CommandInput placeholder="Buscar coordenador..." />
+                              <CommandList>
+                                <CommandEmpty>Nenhum coordenador encontrado.</CommandEmpty>
+                                <CommandGroup>
                                   <CommandItem
-                                    key={professor.id}
-                                    value={`${professor.firstName} ${professor.lastName} ${professor.login}`}
+                                    value=""
                                     onSelect={() => {
-                                      setFormData({ ...formData, professorLogin: professor.login });
+                                      setFormData({ ...formData, coordinatorLogin: '' });
+                                      setCoordinatorPopoverOpen(false);
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", !formData.coordinatorLogin ? "opacity-100" : "opacity-0")} />
+                                    Nenhum
+                                  </CommandItem>
+                                  {coordinators.map((coordinator) => (
+                                    <CommandItem
+                                      key={coordinator.id}
+                                      value={`${coordinator.firstName} ${coordinator.lastName} ${coordinator.login}`}
+                                      onSelect={() => {
+                                        setFormData({ ...formData, coordinatorLogin: coordinator.login });
+                                        setCoordinatorPopoverOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          formData.coordinatorLogin === coordinator.login ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      {coordinator.firstName} {coordinator.lastName} ({coordinator.login})
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Professor</Label>
+                        <Popover open={professorPopoverOpen} onOpenChange={setProfessorPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={professorPopoverOpen}
+                              className="w-full justify-between"
+                            >
+                              {formData.professorLogin
+                                ? (() => {
+                                    const prof = professors.find((p) => p.login === formData.professorLogin);
+                                    return prof ? `${prof.firstName} ${prof.lastName}` : formData.professorLogin;
+                                  })()
+                                : "Selecionar..."}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0 bg-popover">
+                            <Command>
+                              <CommandInput placeholder="Buscar professor..." />
+                              <CommandList>
+                                <CommandEmpty>Nenhum professor encontrado.</CommandEmpty>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value=""
+                                    onSelect={() => {
+                                      setFormData({ ...formData, professorLogin: '' });
                                       setProfessorPopoverOpen(false);
                                     }}
                                   >
-                                    <Check
-                                      className={cn(
-                                        "mr-2 h-4 w-4",
-                                        formData.professorLogin === professor.login ? "opacity-100" : "opacity-0"
-                                      )}
-                                    />
-                                    {professor.firstName} {professor.lastName} ({professor.login})
+                                    <Check className={cn("mr-2 h-4 w-4", !formData.professorLogin ? "opacity-100" : "opacity-0")} />
+                                    Nenhum
                                   </CommandItem>
-                                ))}
-                              </CommandGroup>
-                            </CommandList>
-                          </Command>
-                        </PopoverContent>
-                      </Popover>
+                                  {professors.map((professor) => (
+                                    <CommandItem
+                                      key={professor.id}
+                                      value={`${professor.firstName} ${professor.lastName} ${professor.login}`}
+                                      onSelect={() => {
+                                        setFormData({ ...formData, professorLogin: professor.login });
+                                        setProfessorPopoverOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          formData.professorLogin === professor.login ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      {professor.firstName} {professor.lastName} ({professor.login})
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Tutor</Label>
+                        <Popover open={tutorPopoverOpen} onOpenChange={setTutorPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={tutorPopoverOpen}
+                              className="w-full justify-between"
+                            >
+                              {formData.tutorLogin
+                                ? (() => {
+                                    const tutor = tutors.find((t) => t.login === formData.tutorLogin);
+                                    return tutor ? `${tutor.firstName} ${tutor.lastName}` : formData.tutorLogin;
+                                  })()
+                                : "Selecionar..."}
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0 bg-popover">
+                            <Command>
+                              <CommandInput placeholder="Buscar tutor..." />
+                              <CommandList>
+                                <CommandEmpty>Nenhum tutor encontrado.</CommandEmpty>
+                                <CommandGroup>
+                                  <CommandItem
+                                    value=""
+                                    onSelect={() => {
+                                      setFormData({ ...formData, tutorLogin: '' });
+                                      setTutorPopoverOpen(false);
+                                    }}
+                                  >
+                                    <Check className={cn("mr-2 h-4 w-4", !formData.tutorLogin ? "opacity-100" : "opacity-0")} />
+                                    Nenhum
+                                  </CommandItem>
+                                  {tutors.map((tutor) => (
+                                    <CommandItem
+                                      key={tutor.id}
+                                      value={`${tutor.firstName} ${tutor.lastName} ${tutor.login}`}
+                                      onSelect={() => {
+                                        setFormData({ ...formData, tutorLogin: tutor.login });
+                                        setTutorPopoverOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          formData.tutorLogin === tutor.login ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      {tutor.firstName} {tutor.lastName} ({tutor.login})
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tutorLogin">Login Tutor</Label>
-                      <Input
-                        id="tutorLogin"
-                        value={formData.tutorLogin}
-                        onChange={(e) => setFormData({ ...formData, tutorLogin: e.target.value })}
-                        placeholder="Ex: carlos.lima"
-                      />
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="mes-1">Mês 1 (YYYY-MM)</Label>
-                      <Input
-                        id="mes-1"
-                        value={formData['mes-1']}
-                        onChange={(e) => setFormData({ ...formData, 'mes-1': e.target.value })}
-                        placeholder="Ex: 2025-03"
-                      />
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Mês 1</Label>
+                        <Select
+                          value={formData['mes-1']}
+                          onValueChange={(value) => setFormData({ ...formData, 'mes-1': value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o mês" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Nenhum</SelectItem>
+                            {MONTHS.map((month) => (
+                              <SelectItem key={month.value} value={month.value}>
+                                {month.value} - {month.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Mês 2</Label>
+                        <Select
+                          value={formData['mes-2']}
+                          onValueChange={(value) => setFormData({ ...formData, 'mes-2': value })}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o mês" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Nenhum</SelectItem>
+                            {MONTHS.map((month) => (
+                              <SelectItem key={month.value} value={month.value}>
+                                {month.value} - {month.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="mes-2">Mês 2 (YYYY-MM)</Label>
-                      <Input
-                        id="mes-2"
-                        value={formData['mes-2']}
-                        onChange={(e) => setFormData({ ...formData, 'mes-2': e.target.value })}
-                        placeholder="Ex: 2025-04"
-                      />
-                    </div>
-                  </div>
 
-                  <div className="flex justify-end gap-2 pt-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleDialogClose}
-                      disabled={saving}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button type="submit" disabled={saving}>
-                      {saving ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Salvando...
-                        </>
-                      ) : (
-                        'Salvar'
-                      )}
-                    </Button>
-                  </div>
-                </form>
-              </DialogContent>
-            </Dialog>
+                    <div className="flex justify-end gap-2 pt-4">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleDialogClose}
+                        disabled={saving}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button type="submit" disabled={saving}>
+                        {saving ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Salvando...
+                          </>
+                        ) : (
+                          'Salvar'
+                        )}
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -599,7 +1101,10 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
                         {discipline.coordinatorLogin && (
                           <div>
                             <span className="text-muted-foreground">Coordenador:</span>{' '}
-                            {discipline.coordinatorLogin}
+                            {(() => {
+                              const coord = coordinators.find(c => c.login === discipline.coordinatorLogin);
+                              return coord ? `${coord.firstName} ${coord.lastName} (${coord.login})` : discipline.coordinatorLogin;
+                            })()}
                           </div>
                         )}
                         {discipline.professorLogin && (
@@ -614,19 +1119,22 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
                         {discipline.tutorLogin && (
                           <div>
                             <span className="text-muted-foreground">Tutor:</span>{' '}
-                            {discipline.tutorLogin}
+                            {(() => {
+                              const tutor = tutors.find(t => t.login === discipline.tutorLogin);
+                              return tutor ? `${tutor.firstName} ${tutor.lastName} (${tutor.login})` : discipline.tutorLogin;
+                            })()}
                           </div>
                         )}
                         {discipline['mes-1'] && (
                           <div>
                             <span className="text-muted-foreground">Mês 1:</span>{' '}
-                            {discipline['mes-1']}
+                            {getMonthLabel(discipline['mes-1'])}
                           </div>
                         )}
                         {discipline['mes-2'] && (
                           <div>
                             <span className="text-muted-foreground">Mês 2:</span>{' '}
-                            {discipline['mes-2']}
+                            {getMonthLabel(discipline['mes-2'])}
                           </div>
                         )}
                       </div>
@@ -673,6 +1181,143 @@ const DisciplinesTab = ({ onDataChange }: DisciplinesTabProps) => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Preview Dialog */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Pré-visualização da Importação</DialogTitle>
+            <DialogDescription>
+              Verifique os dados antes de confirmar a importação
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="h-[400px]">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Disciplina</TableHead>
+                  <TableHead>Curso</TableHead>
+                  <TableHead>Coordenador</TableHead>
+                  <TableHead>Professor</TableHead>
+                  <TableHead>Tutor</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewData.map((row, idx) => {
+                  const hasError = !row.courseFound || !row.coordinatorFound || !row.professorFound || !row.tutorFound;
+                  return (
+                    <TableRow key={idx} className={hasError ? 'bg-destructive/10' : ''}>
+                      <TableCell>{row['Nome da Disciplina']}</TableCell>
+                      <TableCell>
+                        {row['Nome do Curso']}
+                        {!row.courseFound && (
+                          <span className="text-destructive ml-2">
+                            <AlertCircle className="h-4 w-4 inline" /> Não encontrado
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {row.coordinatorFullName || row['Login do Coordenador'] || '-'}
+                        {row['Login do Coordenador'] && !row.coordinatorFound && (
+                          <span className="text-destructive ml-2">
+                            <AlertCircle className="h-4 w-4 inline" /> Não encontrado
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {row.professorFullName || row['Login do Professor'] || '-'}
+                        {row['Login do Professor'] && !row.professorFound && (
+                          <span className="text-destructive ml-2">
+                            <AlertCircle className="h-4 w-4 inline" /> Não encontrado
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {row.tutorFullName || row['Login do Tutor'] || '-'}
+                        {row['Login do Tutor'] && !row.tutorFound && (
+                          <span className="text-destructive ml-2">
+                            <AlertCircle className="h-4 w-4 inline" /> Não encontrado
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {hasError ? (
+                          <Badge variant="destructive">Erro</Badge>
+                        ) : (
+                          <Badge variant="default">OK</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setPreviewOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={confirmImport} disabled={uploading}>
+              {uploading ? (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Importando...</>
+              ) : (
+                'Confirmar Importação'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Result Dialog */}
+      <Dialog open={uploadResultOpen} onOpenChange={setUploadResultOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Resultado da Importação</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {uploadResult.created.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-green-600 mb-2">
+                  Criados ({uploadResult.created.length})
+                </h4>
+                <ScrollArea className="h-[100px] border rounded p-2">
+                  {uploadResult.created.map((item, idx) => (
+                    <p key={idx} className="text-sm">{item}</p>
+                  ))}
+                </ScrollArea>
+              </div>
+            )}
+            {uploadResult.ignored.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-yellow-600 mb-2">
+                  Ignorados ({uploadResult.ignored.length})
+                </h4>
+                <ScrollArea className="h-[100px] border rounded p-2">
+                  {uploadResult.ignored.map((item, idx) => (
+                    <p key={idx} className="text-sm">{item}</p>
+                  ))}
+                </ScrollArea>
+              </div>
+            )}
+            {uploadResult.errors.length > 0 && (
+              <div>
+                <h4 className="font-semibold text-red-600 mb-2">
+                  Erros ({uploadResult.errors.length})
+                </h4>
+                <ScrollArea className="h-[100px] border rounded p-2">
+                  {uploadResult.errors.map((item, idx) => (
+                    <p key={idx} className="text-sm">{item}</p>
+                  ))}
+                </ScrollArea>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end mt-4">
+            <Button onClick={() => setUploadResultOpen(false)}>Fechar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
